@@ -1,4 +1,4 @@
-use crate::{errors::Error, utils::is_whitespace};
+use crate::errors::Error;
 use ego_tree::NodeRef;
 use scraper::{ElementRef, Html, Node, Selector};
 use std::{collections::HashMap, fs::File, io::Read, path::PathBuf, str::FromStr};
@@ -204,16 +204,9 @@ macro_rules! children_from_impl {
         impl $t {
             fn children_from(&mut self, value: $v) -> Result<(), Error> {
                 for node in value.children() {
-                    if let Node::Text(text) = node.value() {
-                        let s = text.to_string();
-                        if is_whitespace(&s) {
-                            continue;
-                        } else {
-                            return Err(Error::VoxelDataParseError(format!(
-                                "expected no text nodes, but got: `{}`",
-                                s,
-                            )));
-                        }
+                    if let Node::Text(_) = node.value() {
+                        // ignore all text nodes without returning an error
+                        continue;
                     }
 
                     self.$prop.push(VoxelElement::try_from(node)?);
