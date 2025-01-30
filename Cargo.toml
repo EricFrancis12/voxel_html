@@ -1,0 +1,9 @@
+[package]
+name = "voxel_html"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ego-tree = "0.10.0"
+scraper = "0.22.0"
+thiserror = "2.0.11"
