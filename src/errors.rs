@@ -16,4 +16,7 @@ pub enum Error {
 
     #[error("error parsing VoxelElement: {0}")]
     VoxelElementParseError(String),
+
+    #[error("error parsing VXStyleName: {0}")]
+    VXStyleNameParseError(String),
 }

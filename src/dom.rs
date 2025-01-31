@@ -1,7 +1,7 @@
 use crate::errors::Error;
 use ego_tree::NodeRef;
 use scraper::{ElementRef, Html, Node, Selector};
-use std::{collections::HashMap, fs::File, io::Read, path::PathBuf, str::FromStr};
+use std::{fs::File, io::Read, path::PathBuf, str::FromStr};
 
 #[derive(Debug)]
 enum VoxelTagName {
@@ -23,7 +23,18 @@ impl FromStr for VoxelTagName {
 
 #[derive(Debug, Eq, Hash, PartialEq)]
 enum VoxelAttributeName {
-    Style,
+    VXStyle,
+}
+
+impl VoxelAttributeName {
+    fn from_dataset_str(s: &str) -> Result<Self, Error> {
+        if let Some(_s) = s.strip_prefix("data-") {
+            return Self::from_str(_s);
+        }
+        Err(Error::VoxelAttributeNameParseError(
+            "expected prefix `data-`".to_owned(),
+        ))
+    }
 }
 
 impl FromStr for VoxelAttributeName {
@@ -31,7 +42,7 @@ impl FromStr for VoxelAttributeName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "style" => Ok(Self::Style),
+            "vx_style" => Ok(Self::VXStyle),
             _ => Err(Error::VoxelAttributeNameParseError(format!(
                 "unknown attribute: {}",
                 s,
@@ -40,10 +51,39 @@ impl FromStr for VoxelAttributeName {
     }
 }
 
+enum VXStyleName {
+    XLength,
+    YLength,
+    ZLength,
+}
+
+impl FromStr for VXStyleName {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "x-length" => Ok(Self::XLength),
+            "y-length" => Ok(Self::YLength),
+            "z-length" => Ok(Self::ZLength),
+            _ => Err(Error::VXStyleNameParseError(format!(
+                "unknown vx style name: {}",
+                s
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct VXStyle {
+    x_length: f32,
+    y_length: f32,
+    z_length: f32,
+}
+
 #[derive(Debug)]
 struct VoxelElement {
     tag: VoxelTagName,
-    attributes: HashMap<VoxelAttributeName, String>,
+    vx_style: VXStyle,
     children: Vec<VoxelElement>,
 }
 
@@ -51,7 +91,7 @@ impl<'a> VoxelElement {
     fn new(tag: VoxelTagName) -> Self {
         Self {
             tag,
-            attributes: HashMap::new(),
+            vx_style: VXStyle::default(),
             children: Vec::new(),
         }
     }
@@ -71,8 +111,36 @@ impl<'a> TryFrom<NodeRef<'a, Node>> for VoxelElement {
             let mut ve = Self::new(VoxelTagName::from_str(element.name())?);
 
             for (key, val) in element.attrs() {
-                if let Ok(name) = VoxelAttributeName::from_str(key) {
-                    ve.attributes.insert(name, val.to_owned());
+                if let Ok(name) = VoxelAttributeName::from_dataset_str(key) {
+                    match name {
+                        VoxelAttributeName::VXStyle => {
+                            let pairs = val
+                                .split(";")
+                                .into_iter()
+                                .map(|s| s.trim())
+                                .collect::<Vec<&str>>();
+
+                            for pair in pairs {
+                                if let [k, v] =
+                                    pair.split(":").map(|s| s.trim()).collect::<Vec<&str>>()[..]
+                                {
+                                    if let Ok(sn) = VXStyleName::from_str(k) {
+                                        // TODO: refactor:
+                                        let l = v.parse::<f32>().unwrap_or_default();
+                                        if l < 0.0 {
+                                            continue;
+                                        }
+
+                                        match sn {
+                                            VXStyleName::XLength => ve.vx_style.x_length = l,
+                                            VXStyleName::YLength => ve.vx_style.y_length = l,
+                                            VXStyleName::ZLength => ve.vx_style.z_length = l,
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
