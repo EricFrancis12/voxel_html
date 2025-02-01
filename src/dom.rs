@@ -1,6 +1,11 @@
-use crate::errors::Error;
+use crate::{
+    errors::Error,
+    macros::{QuatBridge, TransformBridge, Vec3Bridge},
+    or_else,
+};
+use bevy::transform::components::Transform;
 use ego_tree::NodeRef;
-use scraper::{ElementRef, Html, Node, Selector};
+use scraper::{node::Element, ElementRef, Html, Node, Selector};
 use std::{fs::File, io::Read, path::PathBuf, str::FromStr};
 
 #[derive(Debug)]
@@ -23,7 +28,7 @@ impl FromStr for VoxelTagName {
 
 #[derive(Debug, Eq, Hash, PartialEq)]
 enum VoxelAttributeName {
-    VXStyle,
+    Transform,
 }
 
 impl VoxelAttributeName {
@@ -42,7 +47,7 @@ impl FromStr for VoxelAttributeName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "vx_style" => Ok(Self::VXStyle),
+            "transform" => Ok(Self::Transform),
             _ => Err(Error::VoxelAttributeNameParseError(format!(
                 "unknown attribute: {}",
                 s,
@@ -51,49 +56,130 @@ impl FromStr for VoxelAttributeName {
     }
 }
 
-enum VXStyleName {
-    XLength,
-    YLength,
-    ZLength,
+enum Vec3PropName {
+    X,
+    Y,
+    Z,
 }
 
-impl FromStr for VXStyleName {
+impl FromStr for Vec3PropName {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "x-length" => Ok(Self::XLength),
-            "y-length" => Ok(Self::YLength),
-            "z-length" => Ok(Self::ZLength),
+            "x" => Ok(Self::X),
+            "y" => Ok(Self::Y),
+            "z" => Ok(Self::Z),
             _ => Err(Error::VXStyleNameParseError(format!(
-                "unknown vx style name: {}",
-                s
+                "unknown Vec3 property: {}",
+                s,
             ))),
         }
     }
 }
 
-#[derive(Debug, Default)]
-struct VXStyle {
-    x_length: f32,
-    y_length: f32,
-    z_length: f32,
-}
-
 #[derive(Debug)]
-struct VoxelElement {
+pub struct VoxelElement {
     tag: VoxelTagName,
-    vx_style: VXStyle,
     children: Vec<VoxelElement>,
+    pub transform: Transform,
 }
 
 impl<'a> VoxelElement {
     fn new(tag: VoxelTagName) -> Self {
         Self {
             tag,
-            vx_style: VXStyle::default(),
             children: Vec::new(),
+            transform: Transform::default(),
         }
+    }
+}
+
+impl TryFrom<&Element> for VoxelElement {
+    type Error = Error;
+
+    fn try_from(value: &Element) -> Result<Self, Self::Error> {
+        let mut ve = Self::new(VoxelTagName::from_str(value.name())?);
+
+        for (key, val) in value.attrs() {
+            let key_parts: Vec<&str> = key.split(".").collect();
+            if let Some(part_0) = key_parts.get(0) {
+                if let Ok(name) = VoxelAttributeName::from_dataset_str(part_0) {
+                    match name {
+                        VoxelAttributeName::Transform => {
+                            if let Some(part_1) = key_parts.get(1) {
+                                match *part_1 {
+                                    "translation" => {
+                                        if let Some(part_2) = key_parts.get(2) {
+                                            match *part_2 {
+                                                "x" => {
+                                                    ve.transform.translation.x =
+                                                        or_else!(val.parse::<f32>(), continue);
+                                                }
+                                                "y" => {
+                                                    ve.transform.translation.y =
+                                                        or_else!(val.parse::<f32>(), continue);
+                                                }
+                                                "z" => {
+                                                    ve.transform.translation.z =
+                                                        or_else!(val.parse::<f32>(), continue);
+                                                }
+                                                _ => {}
+                                            }
+                                        } else {
+                                            ve.transform.translation = or_else!(
+                                                // TODO: ...
+                                                // Vec3Bridge::inline_parse(val)
+                                                //     .or(Vec3Bridge::json_parse(val)),
+                                                Vec3Bridge::json_parse(val),
+                                                continue
+                                            );
+                                        }
+                                    }
+                                    "rotation" => {
+                                        if let Some(part_2) = key_parts.get(2) {
+                                            match *part_2 {
+                                                _ => todo!(),
+                                            }
+                                        } else {
+                                            ve.transform.rotation =
+                                                or_else!(QuatBridge::json_parse(val), continue);
+                                        }
+                                    }
+                                    "scale" => {
+                                        if let Some(part_2) = key_parts.get(2) {
+                                            match *part_2 {
+                                                "x" => {
+                                                    ve.transform.scale.x =
+                                                        or_else!(val.parse::<f32>(), continue);
+                                                }
+                                                "y" => {
+                                                    ve.transform.scale.y =
+                                                        or_else!(val.parse::<f32>(), continue);
+                                                }
+                                                "z" => {
+                                                    ve.transform.scale.z =
+                                                        or_else!(val.parse::<f32>(), continue);
+                                                }
+                                                _ => {}
+                                            }
+                                        } else {
+                                            ve.transform.scale =
+                                                or_else!(Vec3Bridge::json_parse(val), continue);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                ve.transform = or_else!(TransformBridge::json_parse(val), continue);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return Ok(ve);
     }
 }
 
@@ -108,44 +194,8 @@ impl<'a> TryFrom<NodeRef<'a, Node>> for VoxelElement {
         let node = value.value();
 
         if let Node::Element(element) = node {
-            let mut ve = Self::new(VoxelTagName::from_str(element.name())?);
-
-            for (key, val) in element.attrs() {
-                if let Ok(name) = VoxelAttributeName::from_dataset_str(key) {
-                    match name {
-                        VoxelAttributeName::VXStyle => {
-                            let pairs = val
-                                .split(";")
-                                .into_iter()
-                                .map(|s| s.trim())
-                                .collect::<Vec<&str>>();
-
-                            for pair in pairs {
-                                if let [k, v] =
-                                    pair.split(":").map(|s| s.trim()).collect::<Vec<&str>>()[..]
-                                {
-                                    if let Ok(sn) = VXStyleName::from_str(k) {
-                                        // TODO: refactor:
-                                        let l = v.parse::<f32>().unwrap_or_default();
-                                        if l < 0.0 {
-                                            continue;
-                                        }
-
-                                        match sn {
-                                            VXStyleName::XLength => ve.vx_style.x_length = l,
-                                            VXStyleName::YLength => ve.vx_style.y_length = l,
-                                            VXStyleName::ZLength => ve.vx_style.z_length = l,
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            let mut ve = Self::try_from(element)?;
             ve.children_from(value)?;
-
             return Ok(ve);
         }
 
@@ -158,8 +208,8 @@ impl<'a> TryFrom<NodeRef<'a, Node>> for VoxelElement {
 
 #[derive(Debug)]
 pub struct VoxelData {
-    root: VoxelElement,
-    elements: Vec<VoxelElement>,
+    pub root: VoxelElement,
+    pub elements: Vec<VoxelElement>,
 }
 
 impl VoxelData {
@@ -253,6 +303,9 @@ impl TryFrom<ElementRef<'_>> for VoxelData {
 
     fn try_from(value: ElementRef) -> Result<Self, Self::Error> {
         let mut vd = Self::new(VoxelTagName::from_str(value.value().name())?);
+
+        vd.root = VoxelElement::try_from(value.value())?;
+
         vd.children_from(value)?;
         return Ok(vd);
     }

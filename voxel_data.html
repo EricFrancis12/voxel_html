@@ -8,12 +8,18 @@
 </head>
 
 <body>
-    <div data-vx_style="x-length: 1; y-length: 2; z-length: 3"></div>
-    <div></div>
+    <div
+        data-transform='{"translation":{"x":17.0,"Y":18.0,"z":19.0}, "rotation":{m128:[0.0,0.0,0.0,0.0]}, "scale":{"x":2.0,"Y":2.0,"z":2.0}}'>
+    </div>
+    <div data-transform.translation="x: 4; y: 5; z: 6"></div>
+    <div data-transform.translation.x="7" data-transform.translation.y="8" data-transform.translation.z="9">
+    </div>
     <div></div>
 
     <div id="root">
-        <div data-vx_style="x-length: 1; y-length: 2; z-length: 3">Some text</div>
+        <div data-transform.translation.x="7" data-transform.translation.y="8" data-transform.translation.z="9">
+            Some text
+        </div>
         More text
         <div></div>
     </div>
